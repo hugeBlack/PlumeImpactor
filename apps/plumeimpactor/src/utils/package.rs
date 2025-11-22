@@ -117,7 +117,7 @@ impl Package {
                     settings.should_only_use_main_provisioning = true;
                 }
                 "com.SideStore.SideStore" => {
-                    settings.should_embed_p12 = true;
+                    settings.should_simulate_altserver = true;
                 }
                 _ => {}
             }

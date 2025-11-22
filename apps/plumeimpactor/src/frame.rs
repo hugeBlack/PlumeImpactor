@@ -8,6 +8,7 @@ use grand_slam::auth::Account;
 use grand_slam::developer::DeveloperSession;
 use grand_slam::utils::{PlistInfoTrait};
 use idevice::utils::installation;
+use plist::Value;
 use tokio::fs;
 use wxdragon::prelude::*;
 
@@ -455,14 +456,30 @@ impl PlumeFrame {
                                 ).map_err(|e| format!("Failed to set matching identifier: {}", e))?;
                             }
                         }
-
-                        if signer_settings.should_embed_p12 {
+                        let mut is_lc_ss = false;
+                        if bundle.dir().join("Frameworks/SideStoreApp.framework/Info.plist").exists() {
+                            signer_settings.should_simulate_altserver = true;
+                            is_lc_ss = true;
+                        }
+                        if signer_settings.should_simulate_altserver {
                             if let Some(p12_data) = &cert_identity.p12_data {
                                 if let Some(serial_number) = &cert_identity.serial_number {
-                                    bundle.set_info_plist_key("ALTCertificateID", &**serial_number)
-                                        .map_err(|e| format!("Failed to set cert serial: {}", e))?;
-                                    fs::write(bundle.dir().join("ALTCertificate.p12"), p12_data)
-                                        .await.map_err(|e| format!("Failed to write p12: {}", e))?;
+                                    if is_lc_ss {
+                                        let sidestore_plist_path = bundle.dir().join("Frameworks/SideStoreApp.framework/Info.plist");
+                                        let mut plist = Value::from_file(sidestore_plist_path.clone()).map_err(|e| format!("Failed to load p12: {e}"))?;
+                                        if let Some(dict) = plist.as_dictionary_mut() {
+                                            dict.insert("ALTCertificateID".to_string(), (&**serial_number).into());
+                                        }
+                                        plist.to_file_xml(&sidestore_plist_path).map_err(|e| format!("Failed to set cert serial: {}", e))?;
+                                        fs::write(bundle.dir().join("Frameworks/SideStoreApp.framework/ALTCertificate.p12"), p12_data)
+                                            .await.map_err(|e| format!("Failed to write p12: {}", e))?;
+                                    } else {
+                                        bundle.set_info_plist_key("ALTCertificateID", &**serial_number)
+                                            .map_err(|e| format!("Failed to set cert serial: {}", e))?;
+                                        fs::write(bundle.dir().join("ALTCertificate.p12"), p12_data)
+                                            .await.map_err(|e| format!("Failed to write p12: {}", e))?;
+                                    }
+
                                 }
                             }
                         }
@@ -517,16 +534,23 @@ impl PlumeFrame {
                                 }
                                 
                                 if let Some(app_groups) = macho.app_groups_for_entitlements() {
+                                    let mut app_group_ids: Vec<String> = Vec::new();
                                     for group in &app_groups {
                                         let group = format!("{group}.{team_id}");
                                         let group_id = session.qh_ensure_app_group(team_id, &group, &group)
                                             .await
                                             .map_err(|e| format!("Failed to ensure app group: {}", e))?;
-
-                                        session.qh_assign_app_group(team_id, &app_id_id.app_id_id, &group_id.application_group)
-                                            .await
-                                            .map_err(|e| format!("Failed to add app group to app ID: {}", e))?;
+                                        app_group_ids.push(group_id.application_group);
                                     }
+
+                                    if signer_settings.should_simulate_altserver {
+                                        bundle.set_info_plist_key("ALTAppGroups", Value::Array(app_groups.iter().map(|s| Value::String(format!("{s}.{team_id}"))).collect()))
+                                            .map_err(|e| format!("Failed to set ALTAppGroups: {}", e))?;
+                                    }
+
+                                    session.qh_assign_app_group(team_id, &app_id_id.app_id_id, &app_group_ids)
+                                        .await
+                                        .map_err(|e| format!("Failed to add app group to app ID: {}", e))?;
                                 }
 
                                 let profiles = session.qh_get_profile(team_id, &app_id_id.app_id_id)

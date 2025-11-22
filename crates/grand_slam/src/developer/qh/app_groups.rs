@@ -51,13 +51,13 @@ impl DeveloperSession {
         }
     }
 
-    pub async fn qh_assign_app_group(&self, team_id: &str, app_id_id: &str, app_group_id: &str) -> Result<ResponseMeta, Error> {
+    pub async fn qh_assign_app_group(&self, team_id: &str, app_id_id: &str, app_group_ids: &Vec<String>) -> Result<ResponseMeta, Error> {
         let endpoint = developer_endpoint!("/QH65B2/ios/assignApplicationGroupToAppId.action");
         
         let mut body = Dictionary::new();
         body.insert("teamId".to_string(), Value::String(team_id.to_string()));
         body.insert("appIdId".to_string(), Value::String(app_id_id.to_string()));
-        body.insert("applicationGroups".to_string(), Value::String(app_group_id.to_string()));
+        body.insert("applicationGroups".to_string(), Value::Array(app_group_ids.iter().map(|s| Value::String(s.to_string())).collect()));
 
         let response = self.qh_send_request(&endpoint, Some(body)).await?;
         let response_data: ResponseMeta = plist::from_value(&Value::Dictionary(response))?;
